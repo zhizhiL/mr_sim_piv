@@ -1,0 +1,5 @@
+numpy
+scipy
+matplotlib
+# The DigiFlow .dfi reader (../digiflowio.py) and vortex_core (../vortex_core.py)
+# need only numpy + scipy. Install into the repo venv: .venv/bin/pip install -r requirements.txt

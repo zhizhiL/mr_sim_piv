@@ -1,0 +1,6 @@
+# generated artifacts (build_plan §6) — keep raw PIV and processed fields out of git
+fields/
+outputs/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
