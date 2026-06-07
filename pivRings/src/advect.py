@@ -129,6 +129,35 @@ def advect_bubbles(field_dir, positions, diameters, stokes, Fr, R=R_BUBBLE,
         return pool.map(_worker, tasks)
 
 
+def advect_trajectories(field: Field3D, positions, diameters, stokes, Fr,
+                        R=R_BUBBLE, gravity=True, t_max=20.0, n_eval=160,
+                        method="LSODA"):
+    """Integrate a population and return full trajectories on a common time grid.
+
+    Returns ``(t_eval, traj, escaped)`` where ``traj`` is (N, n_eval, 3) of
+    positions (NaN after a bubble escapes the FOV, so it disappears in a movie)
+    and ``escaped`` is (N,) bool.  Serial (no pool) — intended for a few hundred
+    bubbles for visualisation."""
+    positions = np.atleast_2d(positions)
+    diameters = np.asarray(diameters, float)
+    stokes = np.asarray(stokes, float)
+    t_eval = np.linspace(0.0, t_max, n_eval)
+    N = len(positions)
+    traj = np.full((N, n_eval, 3), np.nan)
+    escaped = np.zeros(N, bool)
+
+    for i in range(N):
+        v0 = field.velocity(positions[i:i + 1])[0]
+        s0 = np.concatenate([positions[i], v0])
+        sol = solve_ivp(mr_rhs, (0.0, t_max), s0, method=method, t_eval=t_eval,
+                        args=(field, stokes[i], R, Fr, gravity),
+                        events=_escape_event(field), rtol=1e-6, atol=1e-8)
+        k = sol.y.shape[1]
+        traj[i, :k, :] = sol.y[:3, :].T
+        escaped[i] = len(sol.t_events[0]) > 0
+    return t_eval, traj, escaped
+
+
 def to_solver_bubbles_df(positions, velocities, stokes):
     """Assemble the ``bubbles_df`` layout the original solver expects:
     columns [id, x, y, z, vx, vy, vz, St] (``initial_states = df[:, 1:8]``)."""
