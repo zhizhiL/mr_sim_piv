@@ -59,6 +59,9 @@ pivRings/
 
 ## 2. Stage-by-stage spec
 
+### All measurements are in the unit of mm; 
+### all physical quantities should take 20degC for water as fluid and hydrogen gas bubbles as particle
+
 ### Stage A — PIV ingestion (`digiflow_io.py`)
 - `load_piv(station_dir) -> frames` returning a stack of meridional
   `(u_x, u_r)` fields on a common grid `(x, r)`, plus the per-frame timestamps.
@@ -110,13 +113,15 @@ pivRings/
   3D.
 - `sample_stokes(n, csv_path) -> St` : fit log-normal to escape diameters,
   draw sizes from `ε⁺` up to the largest observed escape size, map
-  `d → St` via the calibrated relation.
-- **Open:** the `d → St` calibration constant (fluid properties + chosen
-  scales) and the placement measure — both flagged in the .tex as TBD.
+  `d → St`: $St = \tau_p/\tau_f$ where $\tau_p = \frac{\rho_p*d_b^2}{18 \mu}$ with $d_b$ being individual bubble size;
+   and $\tau_f = R_0 / U_ring$ with R_0 hard-corder to be 20 mm.
+  
 
 ### Stage F — Advection (`advect.py`)
 - Adapt `advect_bubbles_3D_eval.py`: keep the ODE RHS and `multiprocessing`
   pool; replace the field loader to read `fields/station_k/`.
+  `Fr` : $Fr=\sqrt{\frac{\rho * \pi^2 * a_eq^2 *U_ring}{\delta \rho v_b g}}$ where $v_b$ is the individual bubble volume and $g$ the gravity constant;
+  $a_eq$ is the equivalent ellipse axis length after the elliptical fit, to describe the vortex core radius.
 - Keep the with/without-gravity variants. `Du/Dt = (u·∇)u` (quasi-steady, no
   `∂u/∂t`).
 - Add an **out-of-domain / escape** test (bubble leaves the PIV FOV or the
@@ -146,6 +151,7 @@ run_simulation.py  (per station, per parameter set):
 ---
 
 ## 4. Open decisions to surface to the user (do not guess silently)
+Some of them have been addressed in this markdown write up.
 
 1. PIV file format / which velocity components are available (2C vs 2D3C; is
    `u_θ` truly ~0?).
