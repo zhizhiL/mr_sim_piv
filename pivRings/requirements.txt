@@ -1,0 +1,7 @@
+numpy
+scipy
+matplotlib
+# PIV reader for the real data lives at the repo root (digiflowio.py) and needs
+# only numpy + scipy. opencv-python / scikit-image are optional (image masking,
+# Otsu thresholds in the exploratory notebook) and are not required to run the
+# pipeline or the synthetic demo.

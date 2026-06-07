@@ -1,0 +1,8 @@
+# generated artifacts (build_plan.md §6)
+fields/
+outputs/
+
+# python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
