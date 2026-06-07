@@ -39,18 +39,43 @@ class MeanField:
         return float(self.Y[1, 0] - self.Y[0, 0])
 
 
-def time_average(frames: PIVFrames, t_window=None) -> MeanField:
-    """Average u, v, omega over frames with timestamps in ``t_window`` (default all)."""
+def reject_outliers(stack: np.ndarray, n_mad: float = 8.0) -> np.ndarray:
+    """Mask gross PIV outliers (spurious vectors) as NaN via a global MAD test.
+
+    Returns a copy with ``|x - median| > n_mad * 1.4826 * MAD`` set to NaN, so a
+    subsequent ``np.nanmean`` ignores them.  No-op if ``n_mad`` is None or MAD=0."""
+    if n_mad is None:
+        return stack
+    med = np.nanmedian(stack)
+    mad = np.nanmedian(np.abs(stack - med)) * 1.4826
+    if not np.isfinite(mad) or mad <= 0:
+        return stack
+    out = stack.astype(float, copy=True)
+    out[np.abs(stack - med) > n_mad * mad] = np.nan
+    return out
+
+
+def time_average(frames: PIVFrames, t_window=None, reject_mad: float = 8.0) -> MeanField:
+    """Average u, v, omega over frames in ``t_window`` (default all), rejecting
+    gross velocity outliers first (``reject_mad`` MADs; None to disable)."""
     t = frames.t
     sel = (np.ones(frames.nframes, bool) if t_window is None
            else (t >= t_window[0]) & (t <= t_window[1]))
     if sel.sum() == 0:
         raise ValueError("No frames inside the averaging window")
+
+    u = reject_outliers(frames.u[sel], reject_mad)
+    v = reject_outliers(frames.v[sel], reject_mad)
+    n_rejected = int(np.isnan(u).sum() + np.isnan(v).sum())
+    Ux = np.nanmean(u, axis=0)
+    Uy = np.nanmean(v, axis=0)
+    # fill any all-NaN pixels (rare) so gradients stay finite
+    Ux = np.nan_to_num(Ux, nan=float(np.nanmedian(Ux)))
+    Uy = np.nan_to_num(Uy, nan=float(np.nanmedian(Uy)))
     return MeanField(
-        X=frames.X, Y=frames.Y,
-        Ux=frames.u[sel].mean(axis=0), Uy=frames.v[sel].mean(axis=0),
+        X=frames.X, Y=frames.Y, Ux=Ux, Uy=Uy,
         omega=frames.omega[sel].mean(axis=0),
-        meta={"n_avg": int(sel.sum()),
+        meta={"n_avg": int(sel.sum()), "n_outliers_rejected": n_rejected,
               "t_window": (float(t[sel][0]), float(t[sel][-1]))})
 
 

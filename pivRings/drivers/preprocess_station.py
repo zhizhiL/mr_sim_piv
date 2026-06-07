@@ -51,6 +51,9 @@ def main():
     p.add_argument("--smooth-sigma", type=float, default=1.5)
     p.add_argument("--uc-method", default="vorticity_centroid",
                    choices=["vorticity_centroid", "core_linear_fit"])
+    p.add_argument("--u-ring", type=float, default=None,
+                   help="override U_ring (mm/s), e.g. interpolate a bad station "
+                        "from neighbours; used for co-moving + St/Fr scaling")
     p.add_argument("--y-axis", type=float, default=None)
     p.add_argument("--max-frames", type=int, default=None)
     p.add_argument("--start", type=int, default=0, help="first frame of the window")
@@ -78,16 +81,18 @@ def main():
                               start=start, stop=stop)
 
     uc = ft.estimate_Uc(frames, method=args.uc_method)
-    qc = ft.residual_unsteadiness(ft.to_comoving(frames, uc.U_c))
+    U_ring = args.u_ring if args.u_ring is not None else uc.U_c
+    qc = ft.residual_unsteadiness(ft.to_comoving(frames, U_ring))
     mean = avg.smooth_field(avg.time_average(frames), sigma=args.smooth_sigma)
-    field = bf.build_field(mean, U_ring=uc.U_c, R0=R0, y_axis=args.y_axis)
+    field = bf.build_field(mean, U_ring=U_ring, R0=R0, y_axis=args.y_axis)
     bf.save_field(field, out, mean=mean)
 
     Xg, Rg = np.meshgrid(field.x_axis, field.r_axis)
     o1 = nd.assert_field_O1(field.sp_Ux.ev(Xg.ravel(), Rg.ravel()))
     dg.plot_field_sanity(field, os.path.join(out, "streamlines.png"))
 
-    print(f"[{args.station}] frames={frames.nframes}  U_ring={uc.U_c:.2f} mm/s "
+    note = "" if args.u_ring is None else f" [overridden; measured {uc.U_c:.2f}]"
+    print(f"[{args.station}] frames={frames.nframes}  U_ring={U_ring:.2f} mm/s{note} "
           f"({uc.method}, residual {uc.residual_rms:.3f} mm)")
     print(f"[{args.station}] residual unsteadiness={qc['relative_unsteadiness']:.3f}  "
           f"|Ux*| p99={o1:.2f}")

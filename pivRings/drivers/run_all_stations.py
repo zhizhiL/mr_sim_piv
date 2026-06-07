@@ -34,6 +34,7 @@ import digiflow_io as dio
 import frame_transform as ft
 import averaging as avg
 import build_field as bf
+import nondimensional as nd
 import seeding as sd
 import advect as ad
 import diagnostics as dg
@@ -56,6 +57,9 @@ STATIONS = [
 ]
 LOADINGS = [("l1", 20.0), ("l3", 40.0)]
 N_SEED, N_PHI, WORKERS, FPS = 16, 8, 8, 500.0
+# U_ring overrides for stations whose tracked speed is unreliable (e.g. the
+# detector landed on a near-stationary patch). 120_10D -> mean of 5D & 15D.
+U_RING_OVERRIDE = {"120_10D": 44.0}
 
 
 def preprocess(label, folder, coord):
@@ -64,11 +68,14 @@ def preprocess(label, folder, coord):
     start, stop = dio.autodetect_window(station_dir, coord_file, stride=4, verbose=True)
     frames = dio.load_piv(station_dir, coord_file, fps=FPS, start=start, stop=stop)
     uc = ft.estimate_Uc(frames, method="vorticity_centroid")
+    U_ring = U_RING_OVERRIDE.get(label, uc.U_c)
     mean = avg.smooth_field(avg.time_average(frames), sigma=1.5)
-    field = bf.build_field(mean, U_ring=uc.U_c, R0=R0)
+    field = bf.build_field(mean, U_ring=U_ring, R0=R0)
     fdir = os.path.join(FIELDS, label)
     bf.save_field(field, fdir, mean=mean)
-    return fdir, field, mean, uc, (start, stop)
+    Xg, Rg = np.meshgrid(field.x_axis, field.r_axis)
+    ux_p99 = nd.assert_field_O1(field.sp_Ux.ev(Xg.ravel(), Rg.ravel()), warn=True)
+    return fdir, field, mean, uc, (start, stop), ux_p99
 
 
 def main():
@@ -76,7 +83,7 @@ def main():
     for label, folder, coord, piston, nD in STATIONS:
         print("\n" + "=" * 70 + f"\n{label}  ({folder}, {coord}, Up={piston} mm/s, {nD}D)\n" + "=" * 70)
         try:
-            fdir, field, mean, uc, win = preprocess(label, folder, coord)
+            fdir, field, mean, uc, win, ux_p99 = preprocess(label, folder, coord)
         except Exception as e:
             print(f"  PREPROCESS FAILED: {e}")
             summary[label] = {"error": str(e)}
@@ -84,10 +91,13 @@ def main():
         Fr = froude_number(field.U_ring, R0_mm=R0)
         ell = sd.fit_core_ellipse(mean, y_axis=field.y_axis_mm, R0=R0)
         positions = sd.seed_positions(ell, n=N_SEED, n_phi=N_PHI)
+        qc = "" if ux_p99 < 8 else f"  [QC WARN |Ux*|p99={ux_p99:.1f}]"
         print(f"  window {win}  U_ring={field.U_ring:.1f} mm/s  Fr={Fr:.3f}  "
-              f"a_eq={ell.a_eq:.1f} mm  axis_y={field.y_axis_mm:.1f} mm")
+              f"a_eq={ell.a_eq:.1f} mm  axis_y={field.y_axis_mm:.1f} mm  "
+              f"|Ux*|p99={ux_p99:.2f}{qc}")
 
         rec = {"U_ring": field.U_ring, "Fr": Fr, "a_eq_mm": ell.a_eq,
+               "Ux_star_p99": ux_p99, "U_ring_measured": uc.U_c,
                "window": list(win), "downstream_mm": nD * 40.0, "loadings": {}}
         for tag, vol in LOADINGS:
             csv = os.path.join(ESC, f"bubbles_{piston}_{tag}.csv")

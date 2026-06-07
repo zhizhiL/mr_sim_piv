@@ -42,11 +42,22 @@ def tau_f(U_ring_mms, R0_mm):
 # --------------------------------------------------------------------------
 # Validation assertions (dimension_conversion.md §6)
 # --------------------------------------------------------------------------
-def assert_field_O1(Ux_star, p=99, limit=5.0):
-    """§6a: the dimensionless co-moving axial velocity should be O(1)."""
-    val = np.nanpercentile(np.abs(Ux_star), p)
-    assert val < limit, (f"Ux* not O(1) (p{p}={val:.2f} >= {limit}); "
-                         "check U_f / units (mm-vs-m is the usual culprit)")
+def assert_field_O1(Ux_star, p=99, limit=8.0, warn=False):
+    """§6a: the dimensionless co-moving axial velocity should be O(1).
+
+    Strong rings legitimately have swirl a few x U_ring, so the limit is a
+    loose sanity bound (default 8).  With ``warn=True`` a breach prints a
+    warning and returns the value instead of raising — use that in the drivers
+    so one bad station does not abort a batch; the hard assert is for tests."""
+    val = float(np.nanpercentile(np.abs(Ux_star), p))
+    if val >= limit:
+        msg = (f"Ux* not O(1) (p{p}={val:.2f} >= {limit}); check U_f / units, "
+               "the co-moving subtraction, or PIV outliers in this window")
+        if warn:
+            import warnings
+            warnings.warn(msg)
+        else:
+            raise AssertionError(msg)
     return val
 
 
