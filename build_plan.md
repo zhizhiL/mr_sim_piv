@@ -120,8 +120,8 @@ pivRings/
 ### Stage F — Advection (`advect.py`)
 - Adapt `advect_bubbles_3D_eval.py`: keep the ODE RHS and `multiprocessing`
   pool; replace the field loader to read `fields/station_k/`.
-  `Fr` : $Fr=\sqrt{\frac{\rho * \pi^2 * a_eq^2 *U_ring}{\delta \rho v_b g}}$ where $v_b$ is the individual bubble volume and $g$ the gravity constant;
-  $a_eq$ is the equivalent ellipse axis length after the elliptical fit, to describe the vortex core radius.
+  `Fr` : $Fr=\sqrt{\frac{\rho * \pi^2 * a_{eq}^2 *U_ring}{\delta \rho v_b g}}$ where $v_b$ is the individual bubble volume and $g$ the gravity constant;
+  $a_{eq}$ is the equivalent ellipse axis length after the elliptical fit, to describe the vortex core radius.
 - Keep the with/without-gravity variants. `Du/Dt = (u·∇)u` (quasi-steady, no
   `∂u/∂t`).
 - Add an **out-of-domain / escape** test (bubble leaves the PIV FOV or the
