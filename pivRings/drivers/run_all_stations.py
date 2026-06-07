@@ -53,22 +53,31 @@ STATIONS = [
     ("120_15D", "bonus_test_27", "coord_down",      120, 15),
     ("200_5D",  "bonus_test_15", "coord_up",        200,  5),
     ("200_10D", "bonus_test_11", "april_bonus",     200, 10),
-    ("200_15D", "bonus_test_25", "coord_down",      200, 15),
+    ("200_15D", "bonus_test_34", "coord_down",      200, 15),   # was bonus_test_25 (bad field)
 ]
 LOADINGS = [("l1", 20.0), ("l3", 40.0)]
 N_SEED, N_PHI, WORKERS, FPS = 16, 8, 8, 500.0
 # U_ring overrides for stations whose tracked speed is unreliable (e.g. the
 # detector landed on a near-stationary patch). 120_10D -> mean of 5D & 15D.
 U_RING_OVERRIDE = {"120_10D": 44.0}
+# Stations needing a hand-picked window + spatial registration (long window
+# where the ring translates >~R0, so the lab-frame average would smear).
+WINDOW = {"200_15D": (180, 540)}
+REGISTER = {"200_15D"}
 
 
 def preprocess(label, folder, coord):
     station_dir = os.path.join(BASE, folder, "Camera_1")
     coord_file = os.path.join(BASE, f"{coord}_mapping.csv")
-    start, stop = dio.autodetect_window(station_dir, coord_file, stride=4, verbose=True)
+    if label in WINDOW:
+        start, stop = WINDOW[label]
+    else:
+        start, stop = dio.autodetect_window(station_dir, coord_file, stride=4, verbose=True)
     frames = dio.load_piv(station_dir, coord_file, fps=FPS, start=start, stop=stop)
     uc = ft.estimate_Uc(frames, method="vorticity_centroid")
     U_ring = U_RING_OVERRIDE.get(label, uc.U_c)
+    if label in REGISTER:
+        frames = ft.register_frames(frames, uc.x_track)
     mean = avg.smooth_field(avg.time_average(frames), sigma=1.5)
     field = bf.build_field(mean, U_ring=U_ring, R0=R0)
     fdir = os.path.join(FIELDS, label)

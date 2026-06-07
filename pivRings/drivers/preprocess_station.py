@@ -60,6 +60,9 @@ def main():
     p.add_argument("--stop", type=int, default=None, help="last frame (exclusive)")
     p.add_argument("--autodetect", action="store_true",
                    help="auto-pick the in-FOV frame window")
+    p.add_argument("--register", action="store_true",
+                   help="spatially de-translate the ring before averaging "
+                        "(needed for long windows where the ring moves >~R0)")
     p.add_argument("--synthetic", action="store_true")
     args = p.parse_args()
 
@@ -82,6 +85,8 @@ def main():
 
     uc = ft.estimate_Uc(frames, method=args.uc_method)
     U_ring = args.u_ring if args.u_ring is not None else uc.U_c
+    if args.register:
+        frames = ft.register_frames(frames, uc.x_track)
     qc = ft.residual_unsteadiness(ft.to_comoving(frames, U_ring))
     mean = avg.smooth_field(avg.time_average(frames), sigma=args.smooth_sigma)
     field = bf.build_field(mean, U_ring=U_ring, R0=R0, y_axis=args.y_axis)

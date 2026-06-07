@@ -93,6 +93,31 @@ def to_comoving(frames: PIVFrames, U_c: float) -> PIVFrames:
     return out
 
 
+def register_frames(frames: PIVFrames, x_track: np.ndarray, x_ref=None) -> PIVFrames:
+    """Spatially de-translate the ring: shift each frame in x so its tracked
+    axial position ``x_track[k]`` aligns to a common ``x_ref`` (default the
+    window mean).  Needed when the ring moves more than ~half its core spacing
+    across the window, otherwise the lab-frame time-average smears the cores.
+
+    Velocity magnitudes are unchanged (a rigid spatial shift); the residual ring
+    translation is still removed later by the U_ring co-moving subtraction."""
+    from scipy.ndimage import shift as ndshift
+    if x_ref is None:
+        x_ref = float(np.nanmean(x_track))
+    dx = frames.dx
+    u, v, w = [], [], []
+    for k in range(frames.nframes):
+        px = -(x_track[k] - x_ref) / dx           # pixels along axis=1 (x)
+        u.append(ndshift(frames.u[k], (0.0, px), order=1, mode="nearest"))
+        v.append(ndshift(frames.v[k], (0.0, px), order=1, mode="nearest"))
+        w.append(ndshift(frames.omega[k], (0.0, px), order=1, mode="nearest"))
+    out = copy.copy(frames)
+    out.u, out.v, out.omega = np.stack(u), np.stack(v), np.stack(w)
+    out.meta = dict(frames.meta)
+    out.meta["registered_x_ref"] = x_ref
+    return out
+
+
 def residual_unsteadiness(frames_co: PIVFrames) -> dict:
     """QC: temporal std of the co-moving speed relative to its spatial rms.
     Small values support the quasi-steady assumption."""
