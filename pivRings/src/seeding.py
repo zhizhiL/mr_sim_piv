@@ -106,15 +106,28 @@ def _ellipse_boundary(ell: CoreEllipse, n: int, measure: str):
     raise ValueError(f"Unknown measure {measure!r}")
 
 
-def seed_positions(ell: CoreEllipse, n=24, n_phi=16, measure="arclength") -> np.ndarray:
+def seed_positions(ell: CoreEllipse, n=24, n_phi=16, measure="arclength",
+                   seed=None) -> np.ndarray:
     """Place ``n`` meridional seeds and revolve over ``n_phi`` azimuths.
-    Returns DIMENSIONLESS Cartesian positions (n*n_phi, 3)."""
+    Returns DIMENSIONLESS Cartesian positions (n*n_phi, 3).
+
+    ``seed`` (int) randomises the azimuthal angles and the meridional start
+    phase so an ensemble of seeds samples the ring differently — used for
+    multi-seed statistics."""
     xm, rm = _ellipse_boundary(ell, n, measure)
-    phi = np.linspace(0, 2 * np.pi, n_phi, endpoint=False)
+    if seed is None:
+        phi = np.linspace(0, 2 * np.pi, n_phi, endpoint=False)
+        rng = None
+    else:
+        rng = np.random.default_rng(seed)
+        phi = rng.uniform(0, 2 * np.pi, n_phi)        # random azimuths
+        roll = rng.integers(0, n)                       # rotate meridional start
+        xm, rm = np.roll(xm, roll), np.roll(rm, roll)
     P = []
     for x, r in zip(xm, rm):
         r = max(r, 0.0)
-        P.append(np.column_stack([np.full_like(phi, x), r * np.cos(phi), r * np.sin(phi)]))
+        ph = phi if rng is None else rng.uniform(0, 2 * np.pi, n_phi)
+        P.append(np.column_stack([np.full_like(ph, x), r * np.cos(ph), r * np.sin(ph)]))
     return np.vstack(P)
 
 

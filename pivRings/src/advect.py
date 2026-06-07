@@ -35,6 +35,21 @@ class BubbleResult:
     t_escape: float          # dimensionless (nan if captured)
     pos0: np.ndarray         # initial position (dimensionless)
     pos_final: np.ndarray
+    exit_face: str = ""      # which FOV wall it left by: x_min|x_max|r_top|r_bot|""
+    # buoyant detrainment (rises out the top, z>0 via the radial wall) vs
+    # advective FOV-exit (leaves through an axial wall while still orbiting)
+
+
+def _classify_exit(field: Field3D, s):
+    """Which FOV wall the state s exited through (and top vs bottom radially)."""
+    x, y, z = s[0], s[1], s[2]
+    r = np.sqrt(y * y + z * z)
+    xmin, xmax, rmin, rmax = field.bounds
+    dists = {"x_min": x - xmin, "x_max": xmax - x, "r_wall": rmax - r}
+    face = min(dists, key=dists.get)
+    if face == "r_wall":
+        return "r_top" if z >= 0 else "r_bot"   # gravity is +z -> top = buoyant
+    return face
 
 
 def mr_rhs(t, s, field: Field3D, St: float, R: float, Fr: float, gravity: bool):
@@ -83,12 +98,15 @@ def advect_one(field: Field3D, pos0, d_mm, St, Fr, R=R_BUBBLE, gravity=True,
     t_esc = float(sol.t_events[0][0]) if escaped else np.nan
     # last state: the event state if escaped, else the final t_eval point
     if escaped and len(sol.y_events[0]):
-        pos_final = sol.y_events[0][0][:3].copy()
+        s_exit = sol.y_events[0][0]
+        pos_final = s_exit[:3].copy()
+        exit_face = _classify_exit(field, s_exit)
     else:
         pos_final = sol.y[:3, -1].copy()
+        exit_face = ""
     return BubbleResult(d=float(d_mm), St=float(St), escaped=escaped,
                         t_escape=t_esc, pos0=np.asarray(pos0, float),
-                        pos_final=pos_final)
+                        pos_final=pos_final, exit_face=exit_face)
 
 
 # --------------------------------------------------------------------------

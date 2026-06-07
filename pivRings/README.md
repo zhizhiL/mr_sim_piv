@@ -80,6 +80,35 @@ format (`x.npy, y.npy, Ux.npy, Uy.npy, dUxd*.npy, dUyd*.npy, geometry.npy,
 interp_functions.pkl`) so `../advect_bubbles_3D_eval.py` can load it by pointing
 its `path` there — plus `field.pkl` / `mean_field.pkl` for this pipeline.
 
+## Ensemble analysis & deliverables
+
+```bash
+.venv/bin/python drivers/run_all_stations.py     # 6 fields + escape summary
+.venv/bin/python drivers/run_ensembles.py        # multi-seed sweeps + populations
+.venv/bin/python drivers/plot_ensembles.py        # figures from ensembles.npz
+.venv/bin/python drivers/make_movie.py            # 3D advection mp4
+```
+
+Figures (`outputs/`): `figA_fate_breakdown` (captured / buoyant / advective per
+condition), `figB_buoyant_dcrit` (critical detrainment size vs station),
+`figC_volume_vs_time` (trapped-volume time development), `figD_governing_relation`
+(`St_crit ≈ W*·Fr²`, `W*≈2.1`), `bubble_advection.mp4`.
+
+**Escape mode matters (FOV truncation).** Each escape is tagged by the FOV wall
+it crosses (`advect._classify_exit`). The PIV window is smaller than the ring's
+recirculation atmosphere, so a still-orbiting bubble can exit an **axial** wall
+(`x_min/x_max`) — that is an FOV-truncation artifact, *not* physical
+detrainment. Physical (buoyant) detrainment leaves through the **top radial**
+wall (`r_top`, z>0, gravity is +z). All size-threshold analysis uses buoyant
+escape only. A core-seeded tracer is trapped only when the core sits well inside
+the FOV (120_5D, 120_10D, 200_15D); elsewhere advective loss dominates the raw
+escape count, so trust `figB`/`figD` over raw escape fractions.
+
+Result: critical detrainment size falls downstream for the 120 ring
+(0.72→0.40→0.27 mm), matching the measured escaped-size trend; the buoyancy
+number `St/Fr²` at threshold is ~2 across conditions (200_15D is the known
+field-quality outlier).
+
 ## Open decisions still to confirm (build_plan §4)
 
 PIV components (`u_θ ≈ 0`?); `U_ring` per-station vs one canonical per-ring for
