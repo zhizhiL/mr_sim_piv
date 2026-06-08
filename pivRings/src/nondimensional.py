@@ -23,14 +23,17 @@ from constants import (stokes_number, froude_number, stokes_terminal_velocity)
 def nondimensionalize_field(x_mm, r_mm, Ux_mms, Ur_mms, U_ring, R0):
     """Convert a folded meridional field (mm, mm/s) to dimensionless, co-moving.
 
-    Returns ``(x_star, r_star, Ux_star, Ur_star)``.  Gradients must be taken in
-    the starred coordinates afterwards so they come out dimensionless."""
-    if U_ring <= 0:
-        raise ValueError("U_ring must be positive")
+    ``U_ring`` may be SIGNED (negative for a ring propagating in -x, e.g. the
+    coord_down stations): the co-moving subtraction uses the signed value while
+    the velocity SCALE is its magnitude.  Returns ``(x_star, r_star, Ux_star,
+    Ur_star)``; gradients are taken in the starred coordinates afterwards."""
+    scale = abs(U_ring)
+    if scale <= 0:
+        raise ValueError("U_ring magnitude must be positive")
     x_star = np.asarray(x_mm, float) / R0
     r_star = np.asarray(r_mm, float) / R0
-    Ux_star = (np.asarray(Ux_mms, float) - U_ring) / U_ring
-    Ur_star = np.asarray(Ur_mms, float) / U_ring
+    Ux_star = (np.asarray(Ux_mms, float) - U_ring) / scale
+    Ur_star = np.asarray(Ur_mms, float) / scale
     return x_star, r_star, Ux_star, Ur_star
 
 

@@ -93,6 +93,32 @@ def to_comoving(frames: PIVFrames, U_c: float) -> PIVFrames:
     return out
 
 
+def estimate_uring_thinring(mean, sign=1.0, R0_fallback_a=4.0):
+    """Vortex-ring self-propagation speed from the thin-core formula
+
+        U = Gamma / (4 pi R) * (ln(8 R / a) - 1/4)
+
+    using the measured circulation Gamma, ring radius R (half the core
+    spacing) and core radius a (a_eq).  This is the physically-principled,
+    time-independent U_ring estimator; it agrees with the vorticity-centroid
+    fit where the latter is reliable and recovers sensible values where the
+    centroid fit fails.  ``sign`` carries the propagation direction (+/-x).
+    Returns ``(U_ring_signed, info)``."""
+    cores, _, gammas = find_vortex_cores_iterative(mean.X, mean.Y, mean.omega,
+                                                   fit_radius=8.0, verbose=False)
+    (xp, yp, _), (xn, yn, _) = cores
+    R = 0.5 * abs(yp - yn)
+    G = 0.5 * (abs(gammas[0]) + abs(gammas[1]))
+    from seeding import fit_core_ellipse
+    try:
+        ell = fit_core_ellipse(mean, y_axis=0.5 * (yp + yn), R0=20.0)
+        a = ell.a_eq if np.isfinite(ell.a_eq) else R0_fallback_a
+    except Exception:
+        a = R0_fallback_a
+    U = G / (4.0 * np.pi * R) * (np.log(8.0 * R / a) - 0.25)
+    return float(np.sign(sign) * U), {"Gamma": float(G), "R": float(R), "a": float(a)}
+
+
 def register_frames(frames: PIVFrames, x_track: np.ndarray, x_ref=None) -> PIVFrames:
     """Spatially de-translate the ring: shift each frame in x so its tracked
     axial position ``x_track[k]`` aligns to a common ``x_ref`` (default the

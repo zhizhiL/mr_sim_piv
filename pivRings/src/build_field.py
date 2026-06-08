@@ -154,7 +154,10 @@ class Field3D:
 def build_field(mean: MeanField, U_ring: float, R0: float = 20.0,
                 y_axis=None, n_r=None, spline_k=3) -> Field3D:
     """Fold (dimensional) -> nondimensionalise (co-moving) -> differentiate ->
-    revolve into a dimensionless :class:`Field3D`."""
+    revolve into a dimensionless :class:`Field3D`.
+
+    ``U_ring`` may be signed (negative -> ring propagates in -x); the stored
+    ``field.U_ring`` is the magnitude (the velocity scale used for St/Fr)."""
     y0 = locate_axis(mean, y_axis)
     x_mm, r_mm, Ux_mms, Ur_mms = _fold_halfplanes(mean, y0, n_r=n_r)
 
@@ -175,8 +178,9 @@ def build_field(mean: MeanField, U_ring: float, R0: float = 20.0,
         sp_Ux=_sp(Ux), sp_Ur=_sp(Ur),
         sp_dUxdx=_sp(dUxdx), sp_dUxdr=_sp(dUxdr),
         sp_dUrdx=_sp(dUrdx), sp_dUrdr=_sp(dUrdr),
-        y_axis_mm=y0, U_ring=float(U_ring), R0=float(R0),
-        meta={"n_r": len(r_axis), "n_x": len(x_axis), **(mean.meta or {})},
+        y_axis_mm=y0, U_ring=abs(float(U_ring)), R0=float(R0),
+        meta={"n_r": len(r_axis), "n_x": len(x_axis),
+              "U_ring_signed": float(U_ring), **(mean.meta or {})},
     )
     # stash the gridded dimensionless arrays for the solver-format dump
     field.meta["_grids"] = dict(Ux=Ux, Ur=Ur, dUxdx=dUxdx, dUxdr=dUxdr,
