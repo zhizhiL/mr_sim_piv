@@ -49,7 +49,7 @@ were tried:
 
 ---
 
-## 3. Central finding — FOV vs. ring atmosphere
+## 3. Central finding — the `U_ring` / atmosphere-closure mismatch
 
 At the thin-ring `U_ring`, a pure tracer seeded at the core is trapped only for:
 
@@ -58,12 +58,31 @@ At the thin-ring `U_ring`, a pure tracer seeded at the core is trapped only for:
 | **120** | ✅ trap | ✅ trap | ❌ (R=14 artifact) |
 | **200** | ❌ | ❌ | ✅ trap |
 
-The non-trapping stations are **not** a `U_ring` error (adopting the principled
-speed didn't change which trap). Their **co-moving streamlines do not close**
-inside the FOV — the recirculation atmosphere is either weaker than the
-through-flow or larger than the PIV window at the true propagation speed, so
-bubbles advect through. Evidence: `outputs/streamlines_*.png` (120_5D closes;
-200_10D passes straight through), and the core-trapped fractions above.
+**This is NOT a FOV-size problem and NOT an averaging-smear problem** (both
+were tested and ruled out — the FOV is ~5.7 R₀, larger than any ring
+atmosphere; and a sharp, ring-centred 21-frame window still gives 0/8).
+
+The real cause is a **mismatch between the propagation speed and the
+atmosphere-closure speed.** A closed co-moving atmosphere *does* exist for the
+non-trapping stations, but only **below a critical co-moving speed**, and the
+thin-ring propagation speed sits **above** it. For 200_10D (short centred
+window):
+
+```
+ U_ring   50  55  60  65  70 | 80  84(thin-ring)
+ trapped  1.0 1.0 1.0 1.0 1.0| 0.0   0.0
+```
+
+A sharp transition at ~72–75 mm/s; the thin-ring speed (84) is past it, so the
+atmosphere has collapsed in the frame we build. For an ideal steady ring the
+two speeds coincide; here they disagree (~72 vs 84, and the notebook used 115
+for this same movie) because the thin-ring formula overestimates for non-thin
+cores (a/R≈0.3) and the averaged field isn't a perfectly steady ring. **So the
+true `U_ring` for 200_10D is uncertain over ~72–115 mm/s (±~25%), and which
+value is chosen decides whether the field traps at all.** This is the dominant
+open issue — see §6. (Strong fresh rings like 120_5D trap up to very high
+co-moving speeds, so the closure transition is ill-defined there: no single
+estimator is clean for both diffuse and strong rings.)
 
 **Consequence for interpretation.** Each "escape" is tagged by which FOV wall it
 crosses (`advect._classify_exit`): leaving through the **top radial wall**
@@ -128,19 +147,26 @@ their `d_crit` (0.31 / 0.59 / 0.45) is biased and shown as open markers in figB/
 
 ---
 
-## 6. Next steps (prioritized)
+## 6. Next steps (prioritized) — all about pinning down `U_ring`
 
-1. **Enlarge the effective domain**: extrapolate the co-moving field beyond the
-   FOV (taper to the −U_ring far field) or mosaic adjacent windows, so orbits
-   aren't truncated and 200_5D/10D can be evaluated.
-2. **Stream-function atmosphere**: define capture by the closed-ψ separatrix
-   (and `U_ring` by its rear axial stagnation) instead of tracer-in-FOV —
-   removes the FOV confound and gives a second, independent `U_ring`.
-3. **Seed on the recirculation eye** (velocity stagnation), not the vorticity
-   core — removes the ~0.2 R₀ seeding offset.
-4. **Fix 120_15D core detection** (R = 14 mm artifact); re-pick its window.
-5. **Independent ring-speed** from the raw high-speed video (track the front)
-   to cross-check the thin-ring `U_ring`.
+The dominant issue is the propagation speed, not the FOV. In priority order:
+
+1. **Define `U_ring` by atmosphere closure**, consistently: compute the Stokes
+   stream-function ψ in the co-moving frame and choose `U_ring` as the speed at
+   which the separatrix first forms a rear axial stagnation point (the textbook
+   ring-speed definition). This is the transition the tracer test brackets
+   (~72 mm/s for 200_10D) but done topologically, without the tracer/FOV proxy.
+   At that speed the non-trapping stations trap and become usable.
+2. **Independent ring-speed from the raw high-speed video** (track the vortex
+   front frame-to-frame) to break the 72–115 mm/s ambiguity with a measurement
+   that doesn't depend on the averaged PIV field.
+3. **Reconcile the two**: if the stream-function speed and the front-tracking
+   speed agree, adopt it and drop the thin-ring formula (which overestimates for
+   a/R≈0.3 cores); if they disagree, the averaged field isn't a clean ring and
+   needs a tighter window / phase-averaging.
+4. **Seed on the recirculation eye** (velocity stagnation), not the vorticity
+   core — removes the ~0.2 R₀ seeding offset (`core_vs_stagnation.png`).
+5. **Fix 120_15D core detection** (R = 14 mm artifact); re-pick its window.
 
 ---
 
