@@ -44,6 +44,19 @@ PCOL = {120: "#1f77b4", 200: "#d62728"}
 MARK = {5: "o", 10: "s", 15: "^"}
 BUOYANT = "r_top"
 
+# reliability: a station is trustworthy only if its co-moving atmosphere closes
+# (a core-seeded tracer is trapped).  From build_from_cache -> field_summary.json.
+try:
+    _FS = json.load(open(os.path.join(OUT, "field_summary.json")))
+    RELIABLE = {(v["piston"], v["D"]): (v.get("core_trapped", 0) >= 0.5)
+                for v in _FS.values()}
+except Exception:
+    RELIABLE = {}
+
+
+def reliable(piston_v, D_v):
+    return RELIABLE.get((piston_v, D_v), True)
+
 
 def _cm(c):
     m = META[c]
@@ -102,20 +115,32 @@ def fig_fate_breakdown():
 
 # ---------------------------------------------------------------- Fig B
 def fig_buoyant_dcrit():
-    fig, ax = plt.subplots(figsize=(7, 5))
+    """Critical detrainment size vs station.  Only stations whose co-moving
+    atmosphere closes (trapping) are physically reliable; FOV-limited stations
+    are drawn as faded open markers (their threshold is biased by pass-through
+    bubbles) and NOT connected."""
+    fig, ax = plt.subplots(figsize=(7.5, 5))
     for pv in (120, 200):
-        Ds, mus, sgs = [], [], []
+        rel_D, rel_mu, rel_sg = [], [], []
         for Dv in (5, 10, 15):
             mu, sg, cov = buoyant_dcrit(pv, Dv)
-            Ds.append(Dv); mus.append(mu); sgs.append(sg)
-            if not np.isfinite(mu):   # censored: no buoyant threshold resolved
-                ax.annotate("n/a", (Dv, 0.02), color=PCOL[pv], fontsize=8, ha="center")
-        ax.errorbar(Ds, mus, yerr=sgs, marker="o", capsize=3, color=PCOL[pv],
-                    label=f"Up={pv} mm/s")
+            if not np.isfinite(mu):
+                continue
+            if reliable(pv, Dv):
+                rel_D.append(Dv); rel_mu.append(mu); rel_sg.append(sg)
+            else:
+                ax.errorbar(Dv, mu, yerr=sg, marker="o", ms=8, mfc="white",
+                            color=PCOL[pv], alpha=0.5, capsize=3)
+        if rel_D:
+            ax.errorbar(rel_D, rel_mu, yerr=rel_sg, marker="o", capsize=3, lw=2,
+                        color=PCOL[pv], label=f"Up={pv} mm/s (trapping)")
+    ax.scatter([], [], marker="o", facecolor="white", edgecolor="gray",
+               label="FOV-limited (unreliable)")
     ax.set_xlabel("downstream station (D, x40 mm)")
     ax.set_ylabel("critical buoyant-detrainment diameter $d_{crit}$ (mm)")
-    ax.set_title("Critical detrainment size vs station\n(n/a = FOV-truncated, no buoyant threshold resolved)")
-    ax.set_xticks([5, 10, 15]); ax.grid(alpha=0.3); ax.legend()
+    ax.set_title("Critical detrainment size vs station\n"
+                 "(solid = closed atmosphere / reliable; open = FOV-limited)")
+    ax.set_xticks([5, 10, 15]); ax.grid(alpha=0.3); ax.legend(fontsize=8)
     fig.tight_layout(); fig.savefig(os.path.join(OUT, "figB_buoyant_dcrit.png"), dpi=140)
 
 
@@ -143,7 +168,7 @@ def fig_time_development():
 # ---------------------------------------------------------------- Fig D
 def fig_governing_relation():
     fig, ax = plt.subplots(figsize=(7, 5))
-    Fr2, Stc = [], []
+    Fr2, Stc = [], []   # fit uses reliable (trapping) stations only
     for pv in (120, 200):
         for Dv in (5, 10, 15):
             mu, sg, cov = buoyant_dcrit(pv, Dv)
@@ -153,8 +178,12 @@ def fig_governing_relation():
             U = next(META[k]["U_ring"] for k in META if META[k]["piston"] == pv and META[k]["D"] == Dv)
             Fr = next(META[k]["Fr"] for k in META if META[k]["piston"] == pv and META[k]["D"] == Dv)
             stc = float(stokes_number(mu, U, R0))
-            Fr2.append(Fr ** 2); Stc.append(stc)
-            ax.errorbar(Fr ** 2, stc, marker=MARK[Dv], ms=10, color=PCOL[pv], label=c)
+            rel = reliable(pv, Dv)
+            ax.errorbar(Fr ** 2, stc, marker=MARK[Dv], ms=10, color=PCOL[pv],
+                        mfc=(PCOL[pv] if rel else "white"), alpha=1.0 if rel else 0.5,
+                        label=c + ("" if rel else " (FOV-lim)"))
+            if rel:
+                Fr2.append(Fr ** 2); Stc.append(stc)
     Fr2, Stc = np.array(Fr2), np.array(Stc)
     if len(Fr2) >= 2:
         W = float(np.sum(Fr2 * Stc) / np.sum(Fr2 * Fr2))
