@@ -170,6 +170,62 @@ The dominant issue is the propagation speed, not the FOV. In priority order:
 
 ---
 
+## 7a. Numerical resolution — is the ODE time step small enough?
+
+Concern: in `*_volume_vs_time.png` (and the movie) the retained volume collapses
+almost instantly. Three points establish this is **physical, not an
+under-resolved time step**:
+
+1. **`t_eval` ≠ integration step.** `advect_one` / `advect_trajectories` use
+   `solve_ivp(method="LSODA")` with *adaptive* stepping; `n_eval`/`t_eval` only
+   sets where the solution is **sampled for output**, not the internal step
+   (chosen to meet `rtol=1e-6, atol=1e-8`). Escape time comes from the terminal
+   **event**, root-found to tolerance between internal steps — independent of
+   `t_eval`.
+
+2. **The collapse is genuinely fast buoyant detrainment, and it is resolved.**
+   The dimensionless terminal rise speed is `W* = St/Fr²`; at 120_5D
+   (`Fr²=0.0158`) it reaches **W\* ≈ 31** at r=0.9 mm (rising 31× faster than the
+   ring convects). The simulated escape times (upper core) span **t\* ≈ 0.15–1.8,
+   median 0.45** (= 0.05–0.65 s) — fast, but spanning ~7–11 of the movie's 45 ms
+   frames (0% leave before frame 1; my earlier "sub-frame" estimate ignored drag
+   spin-up and geometry). The drag time `t_drag* = St/R ∈ [0.001, 0.25]` is the
+   other fast scale; small bubbles are stiff (`≈0.001`) but LSODA switches to
+   implicit BDF without accuracy loss. Baseline already takes a **median 1650
+   internal steps per escaping trajectory** — these dynamics are finely resolved.
+
+3. **Convergence study confirms it** (`drivers/verify_timestep.py`, 176 bubbles,
+   22 radii × 8, upper core). Same seeded bubbles, four solver settings:
+
+   | setting | tol / cap | captured | mean nfev | fate match | median \|Δt_esc\| |
+   |---|---|---|---|---|---|
+   | baseline | LSODA rtol 1e-6, atol 1e-8 | 54.55% | 18.0k | — | — |
+   | tight | LSODA rtol 1e-9, atol 1e-12 | 54.55% | 66.5k | **100%** | **7.9e-7** |
+   | capped | LSODA + `max_step=5e-4` | 54.55% | — | **100%** | 8.6e-7 |
+   | radau | Radau rtol 1e-8, atol 1e-10 | 53.98% | 117k | 99.4% | 7.9e-7 |
+
+   Per-radius **median escape times are identical to 4 decimals** between
+   baseline and tight at every radius. The few large `max |Δt_esc|` values
+   (~0.09–0.5) come from a handful of bubbles straddling the capture/escape
+   separatrix, where escape time is genuinely sensitive; the lone Radau fate
+   flip (1/176) is one such borderline bubble. The production setting is
+   converged.
+
+   **Convergence figure** (`outputs/120_5D_upper_timestep_convergence.png`, from
+   `verify_timestep.py --plot`, 71 escaping bubbles vs a `rtol=1e-12` gold
+   reference): (left) escape-time error falls ~first-order as `rtol` tightens,
+   reaching **2.1e-6 at production `rtol=1e-6`** with no floor; (right) with
+   `rtol` fixed, an explicit `max_step` cap from `Δt*=0.2` to `0.002` leaves the
+   error **flat at ~2e-6** — the adaptive step near escape is already finer than
+   any cap, so accuracy is **tolerance-limited, not step-limited**.
+
+**Separate model caveat (not a time-step issue):** at these sizes the slip
+Reynolds number `Re_b` reaches ~10³, so **Stokes drag is out of its validity
+regime** for large bubbles (build_plan §7). The detrainment is real, but the
+quantitative escape time of the largest bubbles carries a drag-law error.
+
+---
+
 ## 7. How to reproduce
 
 ```bash

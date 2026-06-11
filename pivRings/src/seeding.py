@@ -131,6 +131,83 @@ def seed_positions(ell: CoreEllipse, n=24, n_phi=16, measure="arclength",
     return np.vstack(P)
 
 
+# ==========================================================================
+# Build-plan change #1 — seed on the CORE SURFACE, azimuth uniformly random
+# ==========================================================================
+def seed_core_surface(ell: CoreEllipse, n: int, rng) -> np.ndarray:
+    """Place ``n`` seeds on the elliptical core SURFACE (build-plan change #1).
+
+    The core is the vortex-ring tube; its surface is the meridional core ellipse
+    revolved about the ring axis (a torus).  Each seed is drawn with BOTH angles
+    uniformly random:
+
+        * the poloidal angle ``theta`` around the core cross-section (the
+          ellipse) — "the azimuth of the core";
+        * the ring azimuth ``phi`` around the ring axis.
+
+    so the population uniformly covers the whole torus surface.  Returns
+    DIMENSIONLESS Cartesian positions ``(n, 3)`` (ring axis = x, radial plane =
+    y,z), matching :func:`seed_positions`."""
+    c, s = np.cos(ell.tilt), np.sin(ell.tilt)
+    Rm = np.array([[c, -s], [s, c]])
+    xc, rc = ell.x_c / ell.R0, ell.r_c / ell.R0
+    axi, aeta = ell.a_xi / ell.R0, ell.a_eta / ell.R0
+
+    theta = rng.uniform(0.0, 2 * np.pi, n)         # poloidal angle on the core ellipse
+    local = Rm @ np.vstack([axi * np.cos(theta), aeta * np.sin(theta)])
+    xm = xc + local[0]
+    rm = np.maximum(rc + local[1], 0.0)            # radial distance from ring axis
+    phi = rng.uniform(0.0, 2 * np.pi, n)           # ring azimuth
+    return np.column_stack([xm, rm * np.cos(phi), rm * np.sin(phi)])
+
+
+# ==========================================================================
+# Build-plan change #2 — uniform-in-count discrete size distribution
+# ==========================================================================
+def make_radii_grid(r_min=0.06, r_max=0.9, step=0.04) -> np.ndarray:
+    """Discrete bubble RADII (mm): ``r_min`` .. ``r_max`` inclusive, spacing
+    ``step`` (build-plan change #2: 0.06 .. 0.90 mm by 0.04 -> 22 radii)."""
+    n = int(round((r_max - r_min) / step)) + 1
+    return r_min + step * np.arange(n)
+
+
+@dataclass
+class UniformSizeDist:
+    """Uniform-in-count size distribution (build-plan change #2).
+
+    Equal physical bubble count at EVERY radius on the grid; the common count is
+    fixed by requiring the total injected bubble volume to equal ``loading_uL``
+    (l1 = 20 uL, l3 = 40 uL).  Bubbles are spheres: ``v_b = 4/3 pi r^3`` [uL]."""
+    radii: np.ndarray            # bubble radii [mm]
+    diameters: np.ndarray        # 2*radii [mm] (St is a function of diameter)
+    vol_each: np.ndarray         # per-bubble volume [uL = mm^3]
+    count_per_radius: float      # equal physical count per radius bin (may be < 1)
+    loading_uL: float
+
+    @property
+    def n_radii(self) -> int:
+        return len(self.radii)
+
+    @property
+    def total_volume(self) -> float:
+        return float(self.count_per_radius * self.vol_each.sum())
+
+
+def uniform_size_distribution(loading_uL, r_min=0.06, r_max=0.9,
+                              step=0.04) -> UniformSizeDist:
+    """Build the uniform-in-count size distribution (build-plan change #2).
+
+    ``count_per_radius = loading_uL / sum_i v_i`` so every radius is equally
+    represented in COUNT while the total volume integrates to the experimental
+    loading.  Pass ``loading_uL`` directly or use :func:`loading_from_csv_name`
+    / :data:`LOADING_UL` to map the l1/l3 tag."""
+    radii = make_radii_grid(r_min, r_max, step)
+    vol_each = 4.0 / 3.0 * np.pi * radii ** 3
+    count = float(loading_uL) / float(vol_each.sum())
+    return UniformSizeDist(radii=radii, diameters=2.0 * radii, vol_each=vol_each,
+                           count_per_radius=count, loading_uL=float(loading_uL))
+
+
 @dataclass
 class StokesSample:
     d: np.ndarray        # diameters [mm]
