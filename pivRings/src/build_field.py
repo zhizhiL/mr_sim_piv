@@ -43,9 +43,14 @@ def locate_axis(mean: MeanField, y_axis=None) -> float:
     return float(np.sum(yvals * col_profile) / (np.sum(col_profile) + 1e-12))
 
 
-def _fold_halfplanes(mean: MeanField, y_axis, n_r=None):
+def _fold_halfplanes(mean: MeanField, y_axis, n_r=None, core="both"):
     """Fold upper/lower halves onto a common ``(r>=0, x)`` grid (mm, mm/s).
-    Radial velocity Ur is positive OUTWARD from the axis."""
+    Radial velocity Ur is positive OUTWARD from the axis.
+
+    ``core`` selects which half-plane(s) define the revolved field:
+    ``"both"`` (default) averages the two cores; ``"upper"``/``"lower"`` use a
+    single core, reflected to fill both halves (for the single-core separatrix
+    remedy, §7e — useful when the noisy two-core average fails to close)."""
     x_axis = mean.X[0, :].astype(float)
     yvals = mean.Y[:, 0].astype(float)
     r_signed = yvals - y_axis
@@ -65,11 +70,14 @@ def _fold_halfplanes(mean: MeanField, y_axis, n_r=None):
     Ux = np.zeros((n_r, len(x_axis)))
     Ur = np.zeros((n_r, len(x_axis)))
     for j in range(len(x_axis)):
-        ux = 0.5 * (np.interp(r_axis, r_up, Ux_up[:, j]) + np.interp(r_axis, r_lo, Ux_lo[:, j]))
-        # outward radial velocity: +v upper half, -v lower half
-        ur = 0.5 * (np.interp(r_axis, r_up, Uy_up[:, j]) + np.interp(r_axis, r_lo, -Uy_lo[:, j]))
-        Ux[:, j] = ux
-        Ur[:, j] = ur
+        ux_up = np.interp(r_axis, r_up, Ux_up[:, j]); ur_up = np.interp(r_axis, r_up, Uy_up[:, j])
+        ux_lo = np.interp(r_axis, r_lo, Ux_lo[:, j]); ur_lo = np.interp(r_axis, r_lo, -Uy_lo[:, j])
+        if core == "upper":
+            Ux[:, j], Ur[:, j] = ux_up, ur_up
+        elif core == "lower":
+            Ux[:, j], Ur[:, j] = ux_lo, ur_lo
+        else:
+            Ux[:, j], Ur[:, j] = 0.5 * (ux_up + ux_lo), 0.5 * (ur_up + ur_lo)
     Ur[0, :] = 0.0   # radial velocity vanishes on the axis
     return x_axis, r_axis, Ux, Ur
 
@@ -152,14 +160,16 @@ class Field3D:
 
 
 def build_field(mean: MeanField, U_ring: float, R0: float = 20.0,
-                y_axis=None, n_r=None, spline_k=3) -> Field3D:
+                y_axis=None, n_r=None, spline_k=3, core="both") -> Field3D:
     """Fold (dimensional) -> nondimensionalise (co-moving) -> differentiate ->
     revolve into a dimensionless :class:`Field3D`.
 
     ``U_ring`` may be signed (negative -> ring propagates in -x); the stored
-    ``field.U_ring`` is the magnitude (the velocity scale used for St/Fr)."""
+    ``field.U_ring`` is the magnitude (the velocity scale used for St/Fr).
+    ``core in {both, upper, lower}`` chooses which half-plane(s) define the
+    field (single-core separatrix remedy, §7e)."""
     y0 = locate_axis(mean, y_axis)
-    x_mm, r_mm, Ux_mms, Ur_mms = _fold_halfplanes(mean, y0, n_r=n_r)
+    x_mm, r_mm, Ux_mms, Ur_mms = _fold_halfplanes(mean, y0, n_r=n_r, core=core)
 
     # ---- the single conversion boundary ----
     x_axis, r_axis, Ux, Ur = nondimensionalize_field(x_mm, r_mm, Ux_mms, Ur_mms, U_ring, R0)

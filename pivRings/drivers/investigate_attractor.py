@@ -57,6 +57,9 @@ def main():
     p.add_argument("--field", default=os.path.join(ROOT, "fields", "120_5D"))
     p.add_argument("--core", default="upper")
     p.add_argument("--t-settle", type=float, default=80.0)
+    p.add_argument("--positions", action="store_true",
+                   help="only map the attractor POSITION vs bubble size (colored "
+                        "by radius) over the meridional field, then exit")
     args = p.parse_args()
 
     field = bf.load_field(args.field)
@@ -98,6 +101,70 @@ def main():
 
     rng = np.random.default_rng(3)
     starts = sd.seed_core_surface(ell, 120, rng)                 # candidate guesses on the core
+
+    def settle_sweep(seeds, t=40.0):
+        """Dynamical attractor map: integrate `seeds` at every radius, record the
+        basin (fraction settling to |v|~0) and EACH settled bubble's meridional
+        position (x*, r*=hypot(y,z)).  Per-bubble (x*,r*) is the physical trap
+        location; only the Cartesian mean across azimuths would be spurious."""
+        radii = sd.make_radii_grid()
+        basin, Wstar, pts = [], [], []          # pts: (radius_mm, x*, r*)
+        for rrad in radii:
+            St = float(stokes_number(2 * rrad, field.U_ring, field.R0))
+            Wstar.append(St / Fr ** 2)
+            n_set, rstars = 0, []
+            for x0 in seeds:
+                v0 = field.velocity(x0[None])[0]
+                sol = solve_ivp(mr_rhs, (0.0, t), np.concatenate([x0, v0]),
+                                method="LSODA", args=(field, St, R, Fr, True),
+                                events=_escape_event(field), rtol=1e-6, atol=1e-8)
+                if len(sol.t_events[0]) == 0 and np.linalg.norm(sol.y[3:, -1]) < 1e-3:
+                    xf = sol.y[:3, -1]
+                    rstar = float(np.hypot(xf[1], xf[2]))
+                    pts.append((rrad, float(xf[0]), rstar)); rstars.append(rstar); n_set += 1
+            basin.append(n_set / len(seeds))
+            med = (f"x*~{np.median([p[1] for p in pts if p[0]==rrad]):.2f} "
+                   f"r*~{np.median(rstars):.2f} (spread {np.std(rstars):.2f})"
+                   if n_set >= 3 else "(none trapped)")
+            print(f"  r={rrad:.2f} mm  St={St:.4f}  W*={St/Fr**2:6.2f}  "
+                  f"basin={basin[-1]:5.1%}  {med}", flush=True)
+        return radii, np.array(basin), np.array(Wstar), pts
+
+    def plot_positions(pts, out):
+        xg = np.linspace(field.x_axis[0], field.x_axis[-1], 200)
+        rg = np.linspace(field.r_axis[0], field.r_axis[-1], 180)
+        Xg, Rg = np.meshgrid(xg, rg)
+        Ux = field.sp_Ux.ev(Xg.ravel(), Rg.ravel()).reshape(Xg.shape)
+        Ur = field.sp_Ur.ev(Xg.ravel(), Rg.ravel()).reshape(Xg.shape)
+        P = np.array(pts) if pts else np.zeros((0, 3))
+
+        fig, ax = plt.subplots(figsize=(8.5, 6))
+        ax.streamplot(xg, rg, Ux, Ur, color="0.82", density=1.1, linewidth=0.7, arrowsize=0.7)
+        th = np.linspace(0, 2 * np.pi, 200)
+        c_, s_ = np.cos(ell.tilt), np.sin(ell.tilt)
+        ex = ell.x_c / ell.R0 + (ell.a_xi / ell.R0) * np.cos(th) * c_ - (ell.a_eta / ell.R0) * np.sin(th) * s_
+        er = ell.r_c / ell.R0 + (ell.a_xi / ell.R0) * np.cos(th) * s_ + (ell.a_eta / ell.R0) * np.sin(th) * c_
+        ax.plot(ex, er, "k--", lw=1.2, alpha=0.7, label="core ellipse")
+        if len(P):
+            sc = ax.scatter(P[:, 1], P[:, 2], c=P[:, 0], cmap="viridis", s=42,
+                            edgecolor="k", linewidth=0.3, alpha=0.85, zorder=5)
+            cb = fig.colorbar(sc, ax=ax); cb.set_label("bubble radius (mm)")
+        ax.set_xlabel("x* = x / R0"); ax.set_ylabel("r* = r / R0")
+        ax.set_title(f"Trapping-attractor positions vs bubble size — {label} [{args.core}]\n"
+                     "each dot = one settled bubble (3-D MR equilibrium, meridional projection)")
+        ax.set_xlim(field.x_axis[0], field.x_axis[-1])
+        ax.set_ylim(field.r_axis[0], min(field.r_axis[-1], ell.r_c / ell.R0 + 1.5))
+        ax.legend(loc="upper right")
+        fig.tight_layout(); fig.savefig(out, dpi=140); plt.close(fig)
+        print(f"-> {out}")
+
+    if args.positions:
+        print("[positions] dynamical attractor map (integrating core seeds per radius)")
+        seeds3 = sd.seed_core_surface(ell, 60, np.random.default_rng(7))
+        radii, basin, Wstar, pts = settle_sweep(seeds3)
+        plot_positions(pts, os.path.join(ROOT, "outputs",
+                                         f"{label}_{args.core}_attractor_positions.png"))
+        return
 
     # ---- 1 & 2: settle a small bubble, then locate & classify the fixed point ----
     d0 = 0.20
@@ -141,32 +208,16 @@ def main():
     else:
         print("\n[2] no stable in-domain fixed point found for the small bubble (!)")
 
-    # ---- 3: BASIN of the attractor vs radius (not mere existence) ----
+    # ---- 3: BASIN + settled-position of the attractor vs radius ----
     # A stable fixed point can exist mathematically yet trap nothing if its basin
-    # is tiny.  The dynamical basin is measured directly: integrate the SAME
-    # core-surface seeds at each radius and count how many converge to the
-    # attractor (|v|->0) rather than escape.  That IS the capture fraction; we
-    # report it next to W* to show the basin collapses as buoyancy grows.
-    radii = sd.make_radii_grid()
-    Wstar, basin = [], []
+    # is tiny.  Measured directly: integrate core-surface seeds at each radius,
+    # count how many settle to |v|~0 (the basin = capture fraction) and where
+    # they settle (the attractor position).  The basin collapses as W* grows.
+    print(f"\n[3] dynamical basin + settled position vs radius:")
     seeds3 = sd.seed_core_surface(ell, 40, np.random.default_rng(7))
-    for rr in radii:
-        d = 2 * rr
-        St = float(stokes_number(d, field.U_ring, field.R0))
-        Wstar.append(St / Fr ** 2)
-        n_trap = 0
-        for x0 in seeds3:
-            v0 = field.velocity(x0[None])[0]
-            sol = solve_ivp(mr_rhs, (0.0, 40.0), np.concatenate([x0, v0]),
-                            method="LSODA", args=(field, St, R, Fr, True),
-                            events=_escape_event(field), rtol=1e-6, atol=1e-8)
-            if len(sol.t_events[0]) == 0 and np.linalg.norm(sol.y[3:, -1]) < 1e-3:
-                n_trap += 1
-        basin.append(n_trap / len(seeds3))
-    Wstar = np.array(Wstar); basin = np.array(basin)
-    print(f"\n[3] attractor basin (fraction of core seeds settling to |v|~0) vs radius:")
-    for rr, b, w in zip(radii, basin, Wstar):
-        print(f"    r={rr:.2f} mm  W*={w:6.2f}  basin={b:5.1%}")
+    radii, basin, Wstar, pts = settle_sweep(seeds3)
+    plot_positions(pts, os.path.join(ROOT, "outputs",
+                                     f"{label}_{args.core}_attractor_positions.png"))
 
     # overlay against the measured remaining-% if the summary is available
     rem = None

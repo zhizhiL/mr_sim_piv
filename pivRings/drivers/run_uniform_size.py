@@ -47,9 +47,11 @@ OUT = os.path.join(ROOT, "outputs")
 CORE_COL = {"upper": "#1f77b4", "lower": "#d62728"}
 
 
-def run_core(fdir, field, mean, core, dist, Fr, n_sim, workers, t_max, rng):
+def run_core(fdir, field, mean, core, dist, Fr, n_sim, workers, t_max, rng,
+             escape="fov", sep_poly=None):
     """Seed ``n_sim`` bubbles per radius on one core surface, advect, and return
-    per-bubble records + the fitted ellipse."""
+    per-bubble records + the fitted ellipse.  ``escape`` selects the FOV-rectangle
+    or the streamfunction-separatrix exit test (REPORT §7e)."""
     ell = sd.fit_core_ellipse(mean, y_axis=field.y_axis_mm, R0=field.R0, core=core)
     pos_list, d_list, ri_list = [], [], []
     for ri, d in enumerate(dist.diameters):
@@ -63,7 +65,8 @@ def run_core(fdir, field, mean, core, dist, Fr, n_sim, workers, t_max, rng):
     stokes = stokes_number(diameters, field.U_ring, field.R0)
 
     res = ad.advect_bubbles(fdir, positions, diameters, stokes, Fr,
-                            n_workers=workers, gravity=True, t_max=t_max)
+                            n_workers=workers, gravity=True, t_max=t_max,
+                            escape=escape, sep_poly=sep_poly)
     escaped = np.array([r.escaped for r in res])
     t_esc = np.array([r.t_escape for r in res])
     face = np.array([r.exit_face for r in res], dtype=object).astype(str)
@@ -107,11 +110,16 @@ def main():
     p.add_argument("--t-max", type=float, default=20.0)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--movie", action="store_true")
+    p.add_argument("--escape", choices=["fov", "separatrix"], default="fov",
+                   help="escape test: FOV rectangle (default) or streamfunction "
+                        "separatrix (REPORT §7e, FOV-independent)")
     p.add_argument("--out", default=None)
     args = p.parse_args()
 
     label = os.path.basename(args.field.rstrip("/"))
-    base = args.out or os.path.join(OUT, f"{label}_{args.loading}_uniform")
+    # separatrix runs go to a parallel outputs/separatrix_escape/ tree (keep FOV ones)
+    out_dir = OUT if args.escape == "fov" else os.path.join(OUT, "separatrix_escape")
+    base = args.out or os.path.join(out_dir, f"{label}_{args.loading}_uniform")
     os.makedirs(os.path.dirname(base) if os.path.dirname(base) else ".", exist_ok=True)
 
     field = bf.load_field(args.field)
@@ -119,6 +127,18 @@ def main():
     if mean is None:
         raise SystemExit(f"No mean_field.pkl in {args.field}; re-run preprocess_station.py")
     Fr = froude_number(field.U_ring, R0_mm=field.R0)
+
+    # one (x,r) atmosphere for the whole axisymmetric field — shared by both cores
+    sep_poly = None
+    if args.escape == "separatrix":
+        import separatrix as sx
+        e0 = sd.fit_core_ellipse(mean, y_axis=field.y_axis_mm, R0=field.R0, core="upper")
+        sep = sx.compute_separatrix(field, core_xr=(e0.x_c / field.R0, e0.r_c / field.R0))
+        if sep is None:
+            raise SystemExit("no closed separatrix found; cannot use --escape separatrix")
+        sep_poly = sep.poly
+        print(f"separatrix escape: atmosphere area={sep.area():.2f}  "
+              f"FOV-truncated={sep.fov_truncated}")
     dist = sd.uniform_size_distribution(sd.LOADING_UL[args.loading])
     tau_f = field.R0 / field.U_ring   # s, t = t* tau_f
     rng = np.random.default_rng(args.seed)
@@ -133,7 +153,8 @@ def main():
                                "escaped", "t_escape", "exit_face")}
     for core in cores:
         ell, rec = run_core(args.field, field, mean, core, dist, Fr,
-                            args.n_sim, args.workers, args.t_max, rng)
+                            args.n_sim, args.workers, args.t_max, rng,
+                            escape=args.escape, sep_poly=sep_poly)
         tbl = per_radius_table(dist, rec, args.t_max)
         tables[core] = tbl
         ells[core] = ell
@@ -166,7 +187,7 @@ def main():
     with open(base + "_summary.json", "w") as fh:
         json.dump(summary, fh, indent=2)
 
-    _plots(base, label, dist, tables, tau_f, args.loading)
+    _plots(base, label, dist, tables, tau_f, args.loading, args.escape)
 
     movie_paths = []
     if args.movie:
@@ -191,8 +212,9 @@ def main():
           f"{base}_volume_vs_time.png" + "".join(", " + m for m in movie_paths))
 
 
-def _plots(base, label, dist, tables, tau_f, loading):
+def _plots(base, label, dist, tables, tau_f, loading, escape="fov"):
     radii = dist.radii
+    tag = "FOV escape" if escape == "fov" else "separatrix escape"
 
     # Fig 1: remaining percentage vs radius (per core) + buoyant detrainment
     fig, ax = plt.subplots(figsize=(7.5, 5))
@@ -203,7 +225,7 @@ def _plots(base, label, dist, tables, tau_f, loading):
                 lw=1.1, alpha=0.55, label=f"{core} buoyant detrainment")
     ax.set_xlabel("bubble radius (mm)")
     ax.set_ylabel("remaining percentage  (% captured at $t^*=20$)")
-    ax.set_title(f"Remaining percentage per radius — {label} ({loading})")
+    ax.set_title(f"Remaining percentage per radius — {label} ({loading}, {tag})")
     ax.set_ylim(-2, 102); ax.grid(alpha=0.3); ax.legend(fontsize=8)
     fig.tight_layout(); fig.savefig(base + "_remaining_vs_radius.png", dpi=140)
     plt.close(fig)
@@ -217,7 +239,7 @@ def _plots(base, label, dist, tables, tau_f, loading):
                 lw=1.1, alpha=0.55, label=f"{core} escaped only")
     ax.set_xlabel("bubble radius (mm)")
     ax.set_ylabel("residual / residence time (s)")
-    ax.set_title(f"Residual time per radius — {label} ({loading})\n"
+    ax.set_title(f"Residual time per radius — {label} ({loading}, {tag})\n"
                  "(solid: captured censored at $t_{max}$; dashed: escaped subset)")
     ax.grid(alpha=0.3); ax.legend(fontsize=8)
     fig.tight_layout(); fig.savefig(base + "_residual_time.png", dpi=140)
@@ -239,7 +261,7 @@ def _plots(base, label, dist, tables, tau_f, loading):
                 label=f"{core} core")
     ax.set_xlabel("time (s)")
     ax.set_ylabel("remaining in-ring volume fraction")
-    ax.set_title(f"Volume retention vs time — {label} ({loading}, uniform count)")
+    ax.set_title(f"Volume retention vs time — {label} ({loading}, uniform count, {tag})")
     ax.set_ylim(0, 1.02); ax.grid(alpha=0.3); ax.legend(fontsize=9)
     fig.tight_layout(); fig.savefig(base + "_volume_vs_time.png", dpi=140)
     plt.close(fig)
